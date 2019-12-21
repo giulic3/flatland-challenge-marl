@@ -64,7 +64,7 @@ def main(args):
 		screen_height=1080,
 		screen_width=1920)
 
-	network_action_dict = {}
+	state_machine_action_dict = {}
 	railenv_action_dict = {}
 	max_time_steps = 150
 	T_rewards = []  # List of episodes rewards
@@ -84,10 +84,14 @@ def main(args):
 		for step in range(max_time_steps):
 			
 			for a in range(env.get_num_agents()):
-				network_action = act(args, state[a]) # State machine picks action
-				railenv_action = observation_builder.choose_railenv_action(a, network_action)
+				shortest_path_prediction = observation_builder.cells_sequence[a]
+				state_machine_action, is_alternative = act(args, env, a, state[a], shortest_path_prediction) # State machine picks action
+				if not is_alternative:
+					railenv_action = observation_builder.choose_railenv_action(a, state_machine_action)
+				else:
+					railenv_action = state_machine_action
+				state_machine_action_dict.update({a: state_machine_action})
 				railenv_action_dict.update({a: railenv_action})
-				network_action_dict.update({a: network_action})
 				
 			state, reward, done, info = env.step(railenv_action_dict)  # Env step
 			env_renderer.render_env(show=True, show_observations=False, show_predictions=True)
@@ -107,7 +111,7 @@ def main(args):
 				print('Position: {}'.format(env.agents[a].position))
 				print('Moving? {} at speed: {}'.format(env.agents[a].moving, info['speed'][a]))
 				print('Action required? {}'.format(info['action_required'][a]))
-				print('Network action: {}'.format(network_action_dict[a]))
+				print('Network action: {}'.format(state_machine_action_dict[a]))
 				print('Railenv action: {}'.format(railenv_action_dict[a]))
 				# print('Q values: {}'.format(qvalues[a]))
 				print('Rewards: {}'.format(reward[a]))
