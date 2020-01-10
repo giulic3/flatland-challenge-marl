@@ -23,8 +23,7 @@ from flatland.envs.rail_env import RailEnv
 from flatland.envs.rail_generators import sparse_rail_generator
 from flatland.envs.schedule_generators import sparse_schedule_generator
 from flatland.envs.malfunction_generators import malfunction_from_params
-
-# from flatland.utils.rendertools import RenderTool
+from flatland.utils.rendertools import RenderTool, AgentRenderVariant
 
 import fc_treeobs.nets
 from fc_treeobs.dueling_double_dqn import Agent
@@ -48,10 +47,12 @@ def main(argv):
     training = False
 
     # Initialize a random map
-    x_dim = np.random.randint(20, 30)
-    y_dim = np.random.randint(20, 30)
+    # x_dim = np.random.randint(20, 30)
+    # y_dim = np.random.randint(20, 30)
+    x_dim = 20
+    y_dim = 20
     n_agents = 1
-    tree_depth = 4
+    tree_depth = 2
 
     stochastic_data = {'malfunction_rate': 0,  # Rate of malfunction occurence
                        'min_duration': 0,  # Minimal duration of malfunction
@@ -65,13 +66,13 @@ def main(argv):
                         1. / 4.: 0.25}  # Slow freight train
 
     # Get an observation builder and predictor
-    observation_helper = TreeObsForRailEnv(max_depth=tree_depth, predictor=ShortestPathPredictorForRailEnv())
+    observation_helper = TreeObsForRailEnv(max_depth=tree_depth, predictor=ShortestPathPredictorForRailEnv(max_depth=50))
 
     env = RailEnv(width=x_dim,
                   height=y_dim,
                   rail_generator=sparse_rail_generator(max_num_cities=3,
                                                        seed=1,  # Random seed
-                                                       grid_mode=False,
+                                                       grid_mode=True,
                                                        max_rails_between_cities=2,
                                                        max_rails_in_city=3),
                   schedule_generator=sparse_schedule_generator(speed_ration_map),
@@ -79,8 +80,14 @@ def main(argv):
                   malfunction_generator_and_process_data=malfunction_from_params(stochastic_data),
                   obs_builder_object=observation_helper)
     env.reset(True, True)
-    # env_renderer = RenderTool(env, gl="PILSVG", )
-
+    '''
+    env_renderer = RenderTool(env, 
+                              gl="PILSVG",
+                              agent_render_variant=AgentRenderVariant.AGENT_SHOWS_OPTIONS_AND_BOX,
+                              show_debug=True,
+                              screen_height=1080,
+                              screen_width=1920)
+    '''
     handle = env.get_agent_handles()
     features_per_node = env.obs_builder.observation_dim
     nr_nodes = 0
@@ -93,19 +100,21 @@ def main(argv):
     if 'n_episodes' not in locals():
         n_episodes = 6000
 
-    # max_steps = int(3 * (env.height + env.width))
-    max_steps = env.compute_max_episode_steps(width=env.width, height=env.height)
+    max_steps = int(3 * (env.height + env.width))
+    # max_steps = env.compute_max_episode_steps(width=env.width, height=env.height)
     eps = 1.
     eps_end = 0.005
-    eps_decay = 0.998
+    eps_decay = 0.9998
     action_dict = dict()
     scores_window = deque(maxlen=100)
     done_window = deque(maxlen=100)
     scores = []
     dones_list = []
     action_prob = [0] * action_size
+    q_values = [0] * action_size
     agent_obs = [None] * env.get_num_agents()
     agent_next_obs = [None] * env.get_num_agents()
+    update_values = [False] * env.get_num_agents()
     # Initialize the agent
     agent = Agent(state_size, action_size)
 
@@ -119,6 +128,7 @@ def main(argv):
         Training Curriculum: In order to get good generalization we change the number of agents
         and the size of the levels every 50 episodes.
         """
+        '''
         if episodes % 50 == 0:
             x_dim = np.random.randint(20, 30)
             y_dim = np.random.randint(20, 30)
@@ -135,10 +145,11 @@ def main(argv):
                           number_of_agents=n_agents,
                           malfunction_generator_and_process_data=malfunction_from_params(stochastic_data),
                           obs_builder_object=observation_helper)
-
+        '''
         # Reset environment
         obs, info = env.reset(True, True)
-        # env_renderer.reset()
+        #env_renderer.reset()
+        
 
         # Build agent specific observations
         for a in range(env.get_num_agents()):
@@ -157,12 +168,17 @@ def main(argv):
             for a in range(env.get_num_agents()):
                 if info['action_required'][a]:
                     action = agent.act(agent_obs[a], eps=eps)
+                    q_values[a] = agent.get_q(agent_obs[a])
+                    update_values[a] = True
                     action_prob[action] += 1
                     action_dict.update({a: action})
+                else:
+                    q_values[a] = 0
+                    update_values[a] = False
 
             # Environment step
             next_obs, all_rewards, done, info = env.step(action_dict)
-            # env_renderer.render_env(show=True, show_predictions=True, show_observations=False)
+            #env_renderer.render_env(show=True, show_predictions=True, show_observations=False)
             # Preprocess obs
             for a in range(env.get_num_agents()):
                 if next_obs[a]: # Means I'm not done
@@ -174,7 +190,7 @@ def main(argv):
 
             # Update replay buffer and train agent
             for a in range(env.get_num_agents()):
-                if not done[a]:
+                if not done[a] and update_values[a]: # Update only if it performed an action
                     agent.step(agent_obs[a], action_dict[a], all_rewards[a], next_obs[a], done[a])
                 score += all_rewards[a] / env.get_num_agents()
 
@@ -191,27 +207,31 @@ def main(argv):
         dones_list.append((np.mean(done_window)))
 
         print(
-            '\rTraining {} Agent on ({},{}).\t Episode {}\t Average Score: {:.3f}\tDones: {:.2f}%\tEpsilon: {:.2f} \t Action Probabilities: \t {}'.format(
+            '\rTraining {} Agent on ({},{}).\t Episode {}\t Average Score: {:.3f}\tDones: {:.2f}%\tEpsilon: {:.2f} \tAction Probabilities: {}\t QValues {}: '.format(
                 env.get_num_agents(), x_dim, y_dim,
                 episodes,
                 np.mean(scores_window),
                 100 * np.mean(done_window),
-                eps, action_prob / np.sum(action_prob)), end=" ")
+                eps, 
+                action_prob / np.sum(action_prob),
+                q_values[0]), end=" ")
 
-        if episodes % 1000 == 0:
+        if episodes % 100 == 0:
             print(
-                '\rTraining {} Agent.\t Episode {}\t Average Score: {:.3f}\tDones: {:.2f}%\tEpsilon: {:.2f} \t Action Probabilities: \t {}'.format(
+                '\rTraining {} Agent.\t Episode {}\t Average Score: {:.3f}\tDones: {:.2f}%\tEpsilon: {:.2f} \tAction Probabilities: {}\t QValues {} '.format(
                     env.get_num_agents(),
                     episodes,
                     np.mean(scores_window),
                     100 * np.mean(done_window),
                     eps,
-                    action_prob / np.sum(action_prob)))
+                    action_prob / np.sum(action_prob),
+                    q_values[0]))
+            
             torch.save(agent.qnetwork_local.state_dict(),
-                       './nets/single_agent_navigation' + str(date.today()) + "_" + str(episodes) + '.pth')
+                       './nets/single_agent_navigation' + str(date.today()) + "-4_" + str(episodes) + '.pth')
             action_prob = [1] * action_size
     plt.plot(scores)
-    plt.savefig('single_agent_navigation_scores_train'+str(date.today())+'.png') # First save() and then show() to make it work
+    plt.savefig('single_agent_navigation_scores_train'+str(date.today())+'-4.png') # First save() and then show() to make it work
     plt.show()
 
 
