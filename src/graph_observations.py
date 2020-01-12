@@ -41,9 +41,9 @@ class GraphObsForRailEnv(ObservationBuilder):
                                   'agent_direction '  # Direction with which the agent arrived in this node
                                   'is_target')  # Whether agent's target is in this cell
 
-    def __init__(self, bfs_depth, predictor):
+    def __init__(self, predictor):
         super(GraphObsForRailEnv, self).__init__()
-        self.bfs_depth = bfs_depth
+        # self.bfs_depth = bfs_depth
         self.predictor = predictor
         self.max_prediction_depth = 0
         self.prediction_dict = {}  # Dict handle : list of tuples representing prediction steps
@@ -128,7 +128,7 @@ class GraphObsForRailEnv(ObservationBuilder):
         :return: 
         """
 
-        bfs_graph = self._bfs_graph(handle)
+        #bfs_graph = self._bfs_graph(handle)
         agents = self.env.agents
         agent = agents[handle]
 
@@ -285,7 +285,7 @@ class GraphObsForRailEnv(ObservationBuilder):
         else:
             return self._get_shortest_path_action(handle)  
         
-    
+    '''
     def _bfs_graph(self, handle: int = 0) -> {}:
         """
         Build a graph (dict) of nodes, where nodes are identified by ids, graph is directed, depends on agent direction
@@ -433,7 +433,7 @@ class GraphObsForRailEnv(ObservationBuilder):
                                        is_target=last_is_target)
 
         return node
-
+    '''
     
     def _possible_conflict(self, handle, ts):
         """

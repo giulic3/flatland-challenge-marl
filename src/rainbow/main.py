@@ -19,8 +19,7 @@ from flatland.envs.rail_env import RailEnv
 from flatland.envs.rail_generators import sparse_rail_generator
 from flatland.envs.schedule_generators import sparse_schedule_generator
 from flatland.envs.malfunction_generators import malfunction_from_params
-# We also include a renderer because we want to visualize what is going on in the environment
-from flatland.utils.rendertools import RenderTool, AgentRenderVariant
+#from flatland.utils.rendertools import RenderTool, AgentRenderVariant
 
 from src.graph_observations import GraphObsForRailEnv
 from src.predictions import ShortestPathPredictorForRailEnv
@@ -38,7 +37,8 @@ def main(args):
 	results_dir = os.path.join('results', args.id)
 	if not os.path.exists(results_dir):
 		os.makedirs(results_dir)
-	metrics = {'steps': [],
+	# These are saved in a .pth
+	metrics = {'episodes': [], # originally 'steps'
 			   'rewards': [],
 			   'Qs': [],
 			   'best_avg_done_agents': -float('inf'),
@@ -52,7 +52,6 @@ def main(args):
 		torch.backends.cudnn.enabled = args.enable_cudnn
 	else:
 		args.device = torch.device('cpu')
-	
 	
 	# Simple ISO 8601 timestamped logger
 	def log(s):
@@ -91,12 +90,12 @@ def main(args):
 	
 	schedule_generator = sparse_schedule_generator(speed_ration_map)
 	
-	stochastic_data = {'malfunction_rate': 30,  # Rate of malfunction occurrence
-					   'min_duration': 3,  # Minimal duration of malfunction
-					   'max_duration': 20  # Max duration of malfunction
+	stochastic_data = {'malfunction_rate': args.malfunction_rate,  # Rate of malfunction occurrence
+					   'min_duration': args.min_duration,  # Minimal duration of malfunction
+					   'max_duration': args.max_duration  # Max duration of malfunction
 					   }
 	
-	observation_builder = GraphObsForRailEnv(bfs_depth=args.bfs_depth, predictor=ShortestPathPredictorForRailEnv(max_depth=args.prediction_depth))
+	observation_builder = GraphObsForRailEnv(predictor=ShortestPathPredictorForRailEnv(max_depth=args.prediction_depth))
 	
 	# Construct the environment with the given observation, generators, predictors, and stochastic data
 	env = RailEnv(width=args.width,
@@ -105,13 +104,12 @@ def main(args):
 				  schedule_generator=schedule_generator,
 				  number_of_agents=args.num_agents,
 				  obs_builder_object=observation_builder,
-				  malfunction_generator_and_process_data=malfunction_from_params(stochastic_data),
-				  remove_agents_at_target=True  # Removes agents at the end of their journey to make space for others
-				  )
+				  malfunction_generator_and_process_data=malfunction_from_params(stochastic_data)
+	              )
 	env.reset()
 	
 	state_size = args.prediction_depth * 4 + 4 # TODO
-	action_space = args.network_action_space
+	# action_space = args.network_action_space
 	network_action_dict = {}
 	railenv_action_dict = {}
 	qvalues = {} # Map handle: q value for this step
@@ -140,7 +138,7 @@ def main(args):
 	update_values = [False] * env.get_num_agents() # Used to update agent if action was performed in this step
 	
 	# Number of transitions to do for validating Q
-	
+	print("Validating Q...")
 	while T < args.evaluation_size:
 		
 		for a in range(env.get_num_agents()):
@@ -152,7 +150,7 @@ def main(args):
 			action = np.random.choice(np.arange(5))
 			railenv_action_dict.update({a: action})
 			
-		next_state, rewards, done, info = env.step(railenv_action_dict)
+		next_state, reward, done, info = env.step(railenv_action_dict)
 		val_mem.append(state[0], None, None, all_done) # TODO Using only state from agent 0 for now
 		all_done = done['__all__']
 		state = next_state
@@ -166,13 +164,14 @@ def main(args):
 			  ' | Avg. normalized reward: ' + str(avg_norm_reward))
 	else:
 		# Training loop
+		print("Training started...")
 		dqn.train()
 		################## Episodes loop #######################
 		for ep in trange(1, args.num_episodes + 1):
 			# Reset env at the beginning of one episode
 			state, info = env.reset()
 	
-			# Pick first action # TODO Decide entering of agents, now random
+			# Pick first action - entering of agents is now random
 			for a in range(env.get_num_agents()):
 				action = np.random.choice((0,2))
 				railenv_action_dict.update({a: action})
@@ -223,11 +222,10 @@ def main(args):
 							print('Network action: {}'.format(network_action_dict[a]))
 							print('Railenv action: {}'.format(railenv_action_dict[a]))
 							print('Q values: {}'.format(qvalues[a]))
+							print('Rewards: {}'.format(reward))
+
 				'''
-				if T == 100:
-					print('QValues: {}'.format(qvalues))
-					print('Rewards: {}'.format(reward))
-					
+
 				# Clip reward and update replay buffer
 				for a in range(env.get_num_agents()):
 					'''
@@ -248,7 +246,7 @@ def main(args):
 					for a in range(args.num_agents):
 						mems[a].priority_weight = min(mems[a].priority_weight + priority_weight_increase, 1)
 	
-					if T % args.replay_frequency == 0: # TODO Should learn from info derived from all the replay buffers
+					if T % args.replay_frequency == 0:
 						a = np.random.choice(np.arange(args.num_agents))
 						dqn.learn(mems[a]) # Learn randomly from one of the available replay buffer
 						# dqn.learn(mem)  # Train with n-step distributional double-Q learning
@@ -263,7 +261,6 @@ def main(args):
 						dqn.train()  # Set DQN (online network) back to training mode
 	
 						# If memory path provided, save it
-	
 						if args.memory is not None:
 							save_memory(mems[0], args.memory, args.disable_bzip_memory) # Save only first replay buffer (?)
 							#save_memory(mem, args.memory, args.disable_bzip_memory)
@@ -291,8 +288,8 @@ if __name__ == '__main__':
 	parser.add_argument('--hidden-size', type=int, default=512, metavar='SIZE', help='Network hidden size')
 	parser.add_argument('--noisy-std', type=float, default=0.1, metavar='σ', help='Initial standard deviation of noisy linear layers')
 	parser.add_argument('--atoms', type=int, default=51, metavar='C', help='Discretised size of value distribution')
-	parser.add_argument('--V-min', type=float, default=-30, metavar='V', help='Minimum of value distribution support')
-	parser.add_argument('--V-max', type=float, default=1, metavar='V', help='Maximum of value distribution support')
+	parser.add_argument('--V-min', type=float, default=-10, metavar='V', help='Minimum of value distribution support')
+	parser.add_argument('--V-max', type=float, default=10, metavar='V', help='Maximum of value distribution support')
 	parser.add_argument('--model', type=str, metavar='PARAMS', help='Pretrained model (state dict)')
 	parser.add_argument('--memory-capacity', type=int, default=int(1e6), metavar='CAPACITY', help='Experience replay memory capacity')
 	parser.add_argument('--replay-frequency', type=int, default=4, metavar='k', help='Frequency of sampling from memory')
@@ -305,9 +302,9 @@ if __name__ == '__main__':
 	parser.add_argument('--learning-rate', type=float, default=0.0000625, metavar='η', help='Learning rate')
 	parser.add_argument('--adam-eps', type=float, default=1.5e-4, metavar='ε', help='Adam epsilon')
 	parser.add_argument('--batch-size', type=int, default=32, metavar='SIZE', help='Batch size')
-	parser.add_argument('--learn-start', type=int, default=int(20e3), metavar='STEPS', help='Number of steps before starting training')
+	parser.add_argument('--learn-start', type=int, default=int(20e3), metavar='EPISODES', help='Number of episodes before starting training')
 	parser.add_argument('--evaluate', action='store_true', help='Evaluate only')
-	parser.add_argument('--evaluation-interval', type=int, default=100000, metavar='STEPS', help='Number of training steps between evaluations')
+	parser.add_argument('--evaluation-interval', type=int, default=100000, metavar='EPISODES', help='Number of episodes between evaluations')
 	parser.add_argument('--evaluation-episodes', type=int, default=10, metavar='N', help='Number of evaluation episodes to average over')
 	# TODO: Note that DeepMind's evaluation method is running the latest agent for 500K frames ever every 1M steps
 	parser.add_argument('--evaluation-size', type=int, default=500, metavar='N', help='Number of transitions to use for validating Q')
@@ -334,20 +331,22 @@ if __name__ == '__main__':
 	parser.add_argument('--max-duration', type=int, default=50, help='Max duration of malfunction')
 	parser.add_argument('--observation-builder', type=str, default='GraphObsForRailEnv', help='Class to use to build observation for agent')
 	parser.add_argument('--predictor', type=str, default='ShortestPathPredictorForRailEnv', help='Class used to predict agent paths and help observation building')
-	parser.add_argument('--bfs-depth', type=int, default=4, help='BFS depth of the graph observation')
+	# parser.add_argument('--bfs-depth', type=int, default=4, help='BFS depth of the graph observation')
 	parser.add_argument('--prediction-depth', type=int, default=108, help='Prediction depth for shortest path strategy, i.e. length of a path')
-	parser.add_argument('--view-semiwidth', type=int, default=7, help='Semiwidth of field view for agent in local obs')
-	parser.add_argument('--view-height', type=int, default=30, help='Height of the field view for agent in local obs')
-	parser.add_argument('--offset', type=int, default=10, help='Offset of agent in local obs')
+	# parser.add_argument('--view-semiwidth', type=int, default=7, help='Semiwidth of field view for agent in local obs')
+	# parser.add_argument('--view-height', type=int, default=30, help='Height of the field view for agent in local obs')
+	# parser.add_argument('--offset', type=int, default=10, help='Offset of agent in local obs')
 	# Training parameters
 	parser.add_argument('--num-episodes', type=int, default=1000, help='Number of episodes on which to train the agents')
 
 	# Setup
 	args = parser.parse_args()
 	# Check arguments
+	'''
 	if args.offset > args.height:
 		raise ValueError("Agent offset can't be greater than view height in local obs")
 	if args.offset < 0:
 		raise ValueError("Agent offset must be a positive integer")
+	'''
 	
 	main(args)

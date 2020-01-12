@@ -31,9 +31,7 @@ def test(args, T, ep, dqn, val_mem, metrics, results_dir, evaluate=False):
 
     schedule_generator = sparse_schedule_generator(speed_ration_map)
 
-    observation_builder = GraphObsForRailEnv(
-                                            bfs_depth=args.bfs_depth,
-                                            predictor=ShortestPathPredictorForRailEnv(max_depth=args.prediction_depth))
+    observation_builder = GraphObsForRailEnv(predictor=ShortestPathPredictorForRailEnv(max_depth=args.prediction_depth))
 
     env = RailEnv(
                 width=args.width,
@@ -66,8 +64,9 @@ def test(args, T, ep, dqn, val_mem, metrics, results_dir, evaluate=False):
                 screen_width=1920)
 
     #max_time_steps = env.compute_max_episode_steps(env.width, env.height)
-    max_time_steps = 150 # TODO Debug
-    metrics['steps'].append(T)
+    max_time_steps = 200 # TODO Debug
+    # metrics['steps'].append(T)
+    metrics['episodes'].append(ep)
     T_rewards = [] # List of episodes rewards
     T_Qs = [] # List
     T_num_done_agents = [] # List of number of done agents for each episode
@@ -80,12 +79,12 @@ def test(args, T, ep, dqn, val_mem, metrics, results_dir, evaluate=False):
     for ep in range(args.evaluation_episodes):
         # Reset info
         state, info = env.reset()
-        reward_sum, all_done = 0, False  # reward_sum contains the cummulated reward obtained as sum during the steps
+        reward_sum, all_done = 0, False  # reward_sum contains the cumulative reward obtained as sum during the steps
         num_done_agents = 0
         if args.render:
             env_renderer.reset()
             
-        # Choose first action - decide entering of agents into the environment TODO Now random
+        # Choose first action - decide entering of agents into the environment
         for a in range(env.get_num_agents()):
             action = np.random.choice((0,2))
             railenv_action_dict.update({a: action})
@@ -152,12 +151,11 @@ def test(args, T, ep, dqn, val_mem, metrics, results_dir, evaluate=False):
         T_num_done_agents.append(num_done_agents / env.get_num_agents()) # In proportion to total
         T_all_done.append(all_done)
 
-    # Test Q-values over validation memory
-    
+    # Test Q-values over validation memory 
     for state in val_mem:    # Iterate over valid states
         T_Qs.append(dqn.evaluate_q(state))
-    #if args.debug:
-    print('T_Qs: {}'.format(T_Qs))
+    if args.debug:
+        print('T_Qs: {}'.format(T_Qs)) # These are Qs from a single agent TODO
     
     avg_done_agents = sum(T_num_done_agents) / len(T_num_done_agents) # Average number of agents that reached their target
     avg_reward = sum(T_rewards) / len(T_rewards)
@@ -172,12 +170,12 @@ def test(args, T, ep, dqn, val_mem, metrics, results_dir, evaluate=False):
 
         # Append to results and save metrics
         metrics['rewards'].append(T_rewards)
-        #metrics['Qs'].append(T_Qs)
+        metrics['Qs'].append(T_Qs)
         torch.save(metrics, os.path.join(results_dir, 'metrics.pth'))
 
-        # Plot
-        _plot_line(metrics['steps'], metrics['rewards'], 'Reward', path=results_dir)  # Plot rewards in episodes
-        #_plot_line(metrics['steps'], metrics['Qs'], 'Q', path=results_dir)
+        # Plot HTML
+        _plot_line(metrics['episodes'], metrics['rewards'], 'Reward', path=results_dir)  # Plot rewards in episodes
+        _plot_line(metrics['episodes'], metrics['Qs'], 'Q', path=results_dir)
 
     # Return average number of done agents (in proportion) and average reward
     return avg_done_agents, avg_reward, avg_norm_reward
@@ -199,5 +197,5 @@ def _plot_line(xs, ys_population, title, path=''):
 
     plotly.offline.plot({
         'data': [trace_upper, trace_mean, trace_lower, trace_min, trace_max],
-        'layout': dict(title=title, xaxis={'title': 'Step'}, yaxis={'title': title})
+        'layout': dict(title=title, xaxis={'title': 'Episode'}, yaxis={'title': title})
     }, filename=os.path.join(path, title + '.html'), auto_open=False)

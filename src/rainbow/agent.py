@@ -68,12 +68,13 @@ class RainbowAgent():
 
         with torch.no_grad():
             # Calculate nth next state probabilities
-            pns = self.online_net(next_states)  # Probabilities p(s_t+n, ·; θonline), shape(batch_size * history_length, 2, 51)
+            pns = self.online_net(next_states)  # Probabilities p(s_t+n, ·; θonline), shape(batch_size * history_length, network_action_space, num_atoms) # (64, 2, 51)
             dns = self.support.expand_as(pns) * pns  # Distribution d_t+n = (z, p(s_t+n, ·; θonline)), shape same as pns
-            argmax_indices_ns = dns.sum(2).argmax(1)  # Perform argmax action selection using online network: argmax_a[(z, p(s_t+n, a; θonline))], shape(64)
+            argmax_indices_ns = dns.sum(2).argmax(1)  # Perform argmax action selection using online network: argmax_a[(z, p(s_t+n, a; θonline))], shape(batch_size * history_length)
             self.target_net.reset_noise()  # Sample new target net noise
-            pns = self.target_net(next_states)  # Probabilities p(s_t+n, ·; θtarget), size(64, 2, 51)
-            pns_a = pns[range(self.batch_size), argmax_indices_ns]  # Double-Q probabilities p(s_t+n, argmax_a[(z, p(s_t+n, a; θonline))]; θtarget), size(128, 2, 51)
+            # pns = probabilities next state
+            pns = self.target_net(next_states)  # Probabilities p(s_t+n, ·; θtarget), shape same as pns from online_net
+            pns_a = pns[range(self.batch_size), argmax_indices_ns]  # Double-Q probabilities p(s_t+n, argmax_a[(z, p(s_t+n, a; θonline))]; θtarget)
 
             # Compute Tz (Bellman operator T applied to z)
             Tz = returns.unsqueeze(1) + nonterminals * (self.discount ** self.n) * self.support.unsqueeze(0)  # Tz = R^n + (γ^n)z (accounting for terminal states)
