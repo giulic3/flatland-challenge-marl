@@ -251,26 +251,27 @@ def main(args):
 						dqn.learn(mems[a]) # Learn randomly from one of the available replay buffer
 						# dqn.learn(mem)  # Train with n-step distributional double-Q learning
 	
-					if (ep % args.evaluation_interval) == 0 and (T == args.T_max):  # Eval only at the last step of an episode
-	
-						dqn.eval()  # Set DQN (online network) to evaluation mode
-						avg_done_agents, avg_reward, avg_norm_reward = test(args, T, ep, dqn, val_mem, metrics, results_dir)  # Test
-						log(
-							'T = ' + str(T) + ' / ' + str(args.T_max) + ' | Avg. done agents: ' + str(avg_done_agents) +
-							' | Avg. reward: ' + str(avg_reward) + ' | Avg. normalized reward: ' + str(avg_norm_reward))
-						dqn.train()  # Set DQN (online network) back to training mode
-	
-						# If memory path provided, save it
-						if args.memory is not None:
-							save_memory(mems[0], args.memory, args.disable_bzip_memory) # Save only first replay buffer (?)
-							#save_memory(mem, args.memory, args.disable_bzip_memory)
-	
 					# Update target network
 					if T % args.target_update == 0:
 						dqn.update_target_net()
 	
 				if done['__all__']:
 					break
+			##### EPISODE END ##############
+			if (ep % args.evaluation_interval) == 0: # Evaluate only at the end of the episodes
+
+				dqn.eval()  # Set DQN (online network) to evaluation mode
+				avg_done_agents, avg_reward, avg_norm_reward = test(args, T, ep, dqn, val_mem, metrics, results_dir)  # Test
+				log(
+					'T = ' + str(T) + ' / ' + str(args.T_max) + ' | Avg. done agents: ' + str(avg_done_agents) +
+					' | Avg. reward: ' + str(avg_reward) + ' | Avg. normalized reward: ' + str(avg_norm_reward))
+				dqn.train()  # Set DQN (online network) back to training mode
+
+				# If memory path provided, save it
+				if args.memory is not None:
+					save_memory(mems[0], args.memory, args.disable_bzip_memory)  # Save only first replay buffer (?)
+			# save_memory(mem, args.memory, args.disable_bzip_memory)
+
 			# Checkpoint the network every 'checkpoint_interval' episodes
 			if (args.checkpoint_interval != 0) and (ep % args.checkpoint_interval == 0):
 				dqn.save(results_dir, 'checkpoint.pth')
