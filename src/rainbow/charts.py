@@ -13,23 +13,28 @@ def smooth(y, box_pts):
 
 def main(args):
 	
-	limit = int(args[2])
 	metrics = torch.load(args[1])
-	rewards = metrics['rewards'][:limit] # list of lists
-	#Qs = metrics['Qs'][:limit] # list of lists
-	episodes = metrics['episodes'][:limit] # list
+	rewards = metrics['rewards'] # list of lists
+	Qs = metrics['Qs'] # list of lists
+	episodes = metrics['episodes'] # list
 	
 	rewards_mean = torch.tensor(rewards, dtype=torch.float32).mean(1).squeeze()
-	#Qs_mean = torch.tensor(Qs, dtype=torch.float32).mean(1).squeeze()
+	Qs_mean = torch.tensor(Qs, dtype=torch.float32).mean(1).squeeze()
 	
+	fig, (ax1, ax2) = plt.subplots(nrows=2)
 	#plt.plot(episodes, rewards_mean.numpy(), 'r-', linewidth=1.5)
-	plt.plot(episodes, smooth(rewards_mean.numpy(), 15), 'b-', linewidth=1.5)
-	plt.xlabel("Episode")
-	plt.ylabel("Reward")
+	ax1.plot(episodes, smooth(rewards_mean.numpy(), 15), 'b-', linewidth=1.5)
+	ax1.set(ylabel='Reward')
+	ax1.set_title('Learning curve')
 	#plt.plot(episodes, Qs_mean.numpy(), 'r-', linewidth=1.5)
-	#plt.plot(episodes, smooth(Qs_mean.numpy(), 30), 'g-', linewidth=1.5)
-	plt.savefig("reward-smoothed.png")
-	plt.show()
+	ax2.plot(episodes, smooth(Qs_mean.numpy(), 30), 'r-', linewidth=1.5)
+	ax2.set(xlabel='Episode', ylabel='Q')
+	
+	# Path where to save chart
+	path = args[1].split('/')[:-1]
+	print('/'.join(path))
+	#fig.savefig('/'.join(path)+ "/learning-curve")
+	plt.close(fig)
 
 if __name__ == '__main__':
 	main(sys.argv)
